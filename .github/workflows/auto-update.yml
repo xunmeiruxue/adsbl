@@ -8,7 +8,7 @@ on:
       - '.devcontainer/**'
       - 'LICENSE'
   schedule:
-    - cron: 0 */8 * * *
+    - cron: '0 12,20 * * *'
   workflow_dispatch:
 
 env:
@@ -37,11 +37,17 @@ jobs:
       - name: Run Jar
         run:  mvn spring-boot:run
 
+      - name: Get Current Timestamp
+        id: timestamp
+        env:
+          TZ: Asia/Shanghai
+        run: echo "::set-output name=datetime::$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
       - name: Commit Changes
         id: commit
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 🚀 CI Updated
+          commit_message: 🚀 CI Updated on ${{ steps.timestamp.outputs.datetime }}
 
       - name: Delete Workflow Runs
         uses: Mattraks/delete-workflow-runs@v2
