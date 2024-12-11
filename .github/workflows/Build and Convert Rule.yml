@@ -1,0 +1,60 @@
+name: Build and Convert Rule
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Update Filters
+    types:
+      - completed
+
+
+jobs:
+  build_and_convert:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        ref: build
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+
+    - name: Install requests
+      run: pip install requests
+
+    - name: Execute sing.py to download sing-box
+      run: python build/sing.py
+
+    - name: Extract sing-box and set permissions
+      run: |
+        tar -xzvf sing-box*.tar.gz
+        chmod +x sing-box*/sing-box
+        mv sing-box*/sing-box .
+
+    - name: Download easylist.txt
+      run: wget https://raw.githubusercontent.com/xunmeiruxue/adsbl/refs/heads/now/rule/easylist.txt
+
+    - name: Convert easylist.txt to sing.srs
+      run: ./sing-box rule-set convert --type adguard --output sing.srs easylist.txt
+
+    - name: Create rule/sing directory if it doesn't exist
+      run: mkdir -p rule/sing
+
+    - name: Move sing.srs to rule/sing
+      run: mv sing.srs rule/sing/
+
+    - name: Get Current Beijing Time
+      id: timestamp
+      run: echo "beijing_time=$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_OUTPUT"
+
+    - name: Commit Changes
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        commit_message: "Update sing.srs from easylist.txt (${{ steps.timestamp.outputs.beijing_time }})"
+        branch: build
+        file_pattern: rule/sing/sing.srs
