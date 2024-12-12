@@ -43,9 +43,6 @@ jobs:
           TZ: Asia/Shanghai
         run: echo "::set-output name=datetime::$(date '+%Y-%m-%d %H:%M:%S %Z')"
 
-      - name: Pull remote changes
-        run: git pull --rebase origin now
-        
       - name: Commit Changes
         id: commit
         uses: stefanzweifel/git-auto-commit-action@v5
