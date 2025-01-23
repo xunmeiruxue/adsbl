@@ -5,10 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.fordes.adfs.config.Config;
 import org.fordes.adfs.config.InputProperties;
 import org.fordes.adfs.enums.HandleType;
-import org.fordes.adfs.enums.RuleType;
+import org.fordes.adfs.handler.dns.DnsResolver;
+import org.fordes.adfs.handler.rule.Handler;
+import org.fordes.adfs.model.Rule;
 import org.fordes.adfs.task.FileWriter;
 import org.fordes.adfs.util.BloomFilter;
-import org.fordes.adfs.util.Util;
 import org.springframework.beans.factory.InitializingBean;
 
 import java.io.BufferedReader;
@@ -29,9 +30,10 @@ import java.util.concurrent.atomic.AtomicLong;
 @AllArgsConstructor
 public abstract class RuleHandler implements InitializingBean {
 
-    protected BloomFilter<String> filter;
+    protected final BloomFilter<Rule> filter;
     protected FileWriter writer;
     protected Config config;
+    protected DnsResolver dnsResolver;
     protected static final Map<HandleType, RuleHandler> handlerMap = new HashMap<>(HandleType.values().length);
 
     protected final void register(HandleType type, RuleHandler handler) {
@@ -48,51 +50,43 @@ public abstract class RuleHandler implements InitializingBean {
             String line;
             while ((line = reader.readLine()) != null) {
                 final String original = line;
-                Optional.of(line)
-                        .map(Util::clearRule)
-                        //去除无效规则
-                        .filter(e -> Optional.of(!e.isEmpty())
-                                .filter(t -> t)
-                                .orElseGet(() -> {
-                                    invalid.incrementAndGet();
-                                    return Boolean.FALSE;
-                                }))
-                        //解析规则类型
-                        .map(e -> Map.entry(e, Util.validRule(e)))
-                        //除了 modify 类型，原始规则长度不能超过1024 (https://github.com/AdguardTeam/AdGuardHome/issues/6003)
-                        .filter(e -> Optional.of(RuleType.MODIFY.equals(e.getValue()) || original.length() <= 1024)
-                                .filter(t -> t)
-                                .orElseGet(() -> {
-                                    invalid.incrementAndGet();
-                                    log.debug("invalid rule: {}: Length must be less than 1024", original);
-                                    return Boolean.FALSE;
-                                }))
-                        //过滤重复规则
-                        .filter(e -> Optional.of(!filter.contains(original))
+                Optional.of(line.trim())
+                        .filter(e -> {
+                            if (e.isBlank() || Handler.getHandler(prop.type()).isComment(e)) {
+                                invalid.incrementAndGet();
+                                return Boolean.FALSE;
+                            }
+                            return Boolean.TRUE;
+                        })
+                        .map(e -> Handler.getHandler(prop.type()).parse(e))
+                        .filter(e -> Optional.of(!filter.contains(e))
                                 .filter(t -> t)
                                 .orElseGet(() -> {
                                     log.debug("already exists rule: {}", original);
                                     repeat.incrementAndGet();
                                     return Boolean.FALSE;
                                 }))
+
+                        //域名检测
+                        .filter(e -> dnsResolver.apply(e))
                         //写入阻塞队列
                         .ifPresent(e -> {
 
                             if (original.length() <= config.getWarnLimit()) {
-                                log.warn("[{}] Suspicious rule => {}",prop.name(), original);
+                                log.warn("[{}] Suspicious rule => {}", prop.name(), original);
                             }
 
-                            filter.add(original);
+                            filter.add(e);
                             effective.incrementAndGet();
-                            writer.put(original, e.getValue());
+                            writer.put(e);
                         });
             }
         } catch (Exception e) {
-            log.error("[{}] parser failed  => {}", prop.name(), e.getMessage());
+            log.error("[{}] parser failed  => {}\n", prop.name(), e.getMessage(), e);
         }
 
 
-        log.info("[{}]  parser done => {}/{}/{}", prop.name(),
+        log.info("[{}]  parser done => invalid: {}, repeat: {}, effective: {}", prop.name(),
                 invalid.get(), repeat.get(), effective.get());
     }
 

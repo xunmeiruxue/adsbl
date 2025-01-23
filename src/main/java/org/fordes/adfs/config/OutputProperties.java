@@ -1,13 +1,13 @@
 package org.fordes.adfs.config;
 
 import lombok.Data;
-import org.fordes.adfs.enums.RuleType;
+import org.fordes.adfs.constant.Constants;
+import org.fordes.adfs.enums.RuleSet;
+import org.fordes.adfs.model.Rule;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.Collections;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -22,22 +22,26 @@ import java.util.Set;
 public class OutputProperties {
 
     private String fileHeader;
-    private String path;
-    private Map<String, Set<RuleType>> files;
+    private String path = "rule";
+    private Set<OutputFile> files;
 
-    public void setFiles(Map<String, Set<RuleType>> files) {
-        if (files.isEmpty() || files.values().stream().allMatch(Set::isEmpty)) {
-            this.files = Collections.emptyMap();
-            return;
+    public record OutputFile(String name, RuleSet type, Set<Rule.Type> filter, String desc) {
+
+        public OutputFile(String name, RuleSet type, Set<Rule.Type> filter, String desc) {
+            this.name = Optional.ofNullable(name).filter(StringUtils::hasText).orElseThrow(() -> new IllegalArgumentException("application.output.files.name is required"));
+            this.type = Optional.ofNullable(type).orElseThrow(() -> new IllegalArgumentException("application.output.files.type is required"));
+            this.desc = Optional.ofNullable(desc).filter(StringUtils::hasText).orElse(Constants.EMPTY);
+            this.filter = Optional.ofNullable(filter).orElse(Set.of(Rule.Type.values()));
         }
-        this.files = files;
+
     }
 
+    @Deprecated
     public void setPath(String path) {
-        this.path = Optional.ofNullable(path).filter(StringUtils::hasText).orElse("rule");
+//        this.path = Optional.ofNullable(path).filter(StringUtils::hasText).orElse("rule");
     }
 
     public boolean isEmpty() {
-        return files == null || files.isEmpty() || files.values().stream().allMatch(Set::isEmpty);
+        return files == null || files.isEmpty();
     }
 }

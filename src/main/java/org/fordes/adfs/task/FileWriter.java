@@ -2,10 +2,11 @@ package org.fordes.adfs.task;
 
 import lombok.extern.slf4j.Slf4j;
 import org.fordes.adfs.config.OutputProperties;
-import org.fordes.adfs.enums.RuleType;
 import org.fordes.adfs.event.ExitEvent;
 import org.fordes.adfs.event.StartEvent;
 import org.fordes.adfs.event.StopEvent;
+import org.fordes.adfs.handler.rule.Handler;
+import org.fordes.adfs.model.Rule;
 import org.fordes.adfs.util.Util;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
@@ -20,7 +21,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -39,8 +41,7 @@ public class FileWriter {
     private final OutputProperties output;
     private final ExecutorService consumer;
 
-    protected Map<String, BlockingQueue<String>> fileQueueMap = Map.of();
-    protected Map<RuleType, Set<String>> typeFileMap = Map.of();
+    protected Map<String, BlockingQueue<String>> fileQueueMap;
     private static Boolean stopFlag = null;
 
     @Autowired
@@ -52,20 +53,11 @@ public class FileWriter {
         Optional.ofNullable(output)
                 .filter(e -> !e.isEmpty())
                 .ifPresentOrElse(opt -> {
-                    this.typeFileMap = new HashMap<>(opt.getFiles().size());
-                    this.fileQueueMap = opt.getFiles().entrySet().stream()
-                            .peek(e -> e.getValue().forEach(type -> {
-                                if (typeFileMap.containsKey(type)) {
-                                    typeFileMap.get(type).add(e.getKey());
-                                } else {
-                                    typeFileMap.put(type, new HashSet<>() {{
-                                        add(e.getKey());
-                                    }});
-                                }
-                            }))
+                    this.fileQueueMap = opt.getFiles()
+                            .stream()
                             .map(e -> {
                                 final ArrayBlockingQueue<String> queue = new ArrayBlockingQueue<>(1000);
-                                return Map.entry(e.getKey(), queue);
+                                return Map.entry(e.name(), queue);
                             })
                             .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
                 }, () -> {
@@ -91,43 +83,66 @@ public class FileWriter {
         }
 
         //消费阻塞队列
-        fileQueueMap.forEach((fileName, queue) ->
-                consumer.execute(() -> {
+        output.getFiles().forEach(item -> {
 
-                    try (BufferedWriter writer = Files.newBufferedWriter(Path.of(dir + FILE_SEPARATOR + fileName),
-                            StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING,
-                            StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
+            BlockingQueue<String> queue = fileQueueMap.get(item.name());
+            Handler handler = Handler.getHandler(item.type());
+            String fileName = item.name();
 
-                        // 写入文件头
-                        if (StringUtils.hasText(output.getFileHeader())) {
-                            String header = output.getFileHeader()
-                                    .replace(HEADER_DATE, LocalDateTime.now()
-                                            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))
-                                    .replace(HEADER_NAME, fileName);
-                            writer.write(header, 0, header.length());
-                            writer.newLine();
-                        }
+            consumer.execute(() -> {
 
-                        long total = 0;
-                        while (!stopFlag || !queue.isEmpty()) {
-                            String line = queue.poll();
-                            if (line != null) {
-                                writer.write(line);
-                                total++;
-                                writer.newLine();
-                            } else {
-                                Util.sleep(50);
-                            }
-                        }
+                try (BufferedWriter writer = Files.newBufferedWriter(Path.of(dir + FILE_SEPARATOR + fileName),
+                        StandardCharsets.UTF_8, StandardOpenOption.TRUNCATE_EXISTING,
+                        StandardOpenOption.CREATE, StandardOpenOption.WRITE)) {
 
-                        writer.flush();
-                        log.info("file: {}, total => {}", fileName, total);
-                    } catch (Exception e) {
-                        log.error("file writer error, fileName: {}", fileName, e);
-                        publisher.publishEvent(new ExitEvent(this));
+                    // 写入文件头
+                    if (StringUtils.hasText(output.getFileHeader())) {
+                        String header = handler.commented(output.getFileHeader()
+                                .replace(HEADER_DATE, LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")))
+                                .replace(HEADER_NAME, item.name())
+                                .replace(HEADER_DESC, item.desc())
+                                .replace(HEADER_TYPE, item.type().name().toLowerCase()));
+                        writer.write(header, 0, header.length());
+                        writer.newLine();
                     }
 
-                }));
+                    //写入格式头
+                    String head = handler.headFormat();
+                    if (StringUtils.hasText(head)) {
+                        writer.write(head);
+                        writer.newLine();
+                    }
+
+                    long total = 0;
+                    while (!stopFlag || !queue.isEmpty()) {
+                        String line = queue.poll();
+                        if (line != null) {
+                            writer.write(line);
+                            total++;
+                            writer.newLine();
+                        } else {
+                            Util.sleep(50);
+                        }
+                    }
+
+                    //写入格式尾
+                    String tail = handler.tailFormat();
+                    if (StringUtils.hasText(tail)) {
+                        writer.write(tail);
+                        writer.newLine();
+                    }
+
+                    writer.flush();
+                    log.info("file: {}, total => {}", fileName, total);
+                } catch (Exception e) {
+                    log.error("file writer error, fileName: {}", fileName, e);
+                    publisher.publishEvent(new ExitEvent(this));
+                }
+
+            });
+        });
+
+
     }
 
     @EventListener(classes = StopEvent.class)
@@ -149,22 +164,28 @@ public class FileWriter {
     /**
      * 接收规则并写入阻塞队列
      *
-     * @param line 经校验和格式化后的规则
-     * @param type 规则类型
+     * @param rule {@link Rule}
      */
-    public void put(String line, RuleType type) {
-        Optional.ofNullable(type).ifPresent(e -> {
-            typeFileMap.getOrDefault(e, Set.of()).forEach(file -> {
-                BlockingQueue<String> queue = fileQueueMap.get(file);
+    public void put(Rule rule) {
+        Optional.ofNullable(rule).ifPresent(r -> {
 
-                boolean flag = false;
-                while (!flag) {
-                    flag = queue.offer(line);
-                    if (!flag) {
-                        Util.sleep(50);
-                    }
-                }
-            });
+            output.getFiles()
+                    .stream().filter(e -> e.filter().contains(rule.getType()))
+                    .forEach(e -> {
+
+                        BlockingQueue<String> queue = fileQueueMap.get(e.name());
+                        Optional.ofNullable(Handler.getHandler(e.type()).format(r))
+                                .filter(s -> !s.isEmpty())
+                                .ifPresent(line -> {
+                                    boolean flag = false;
+                                    while (!flag) {
+                                        flag = queue.offer(line);
+                                        if (!flag) {
+                                            Util.sleep(50);
+                                        }
+                                    }
+                                });
+                    });
         });
     }
 }

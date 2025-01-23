@@ -23,18 +23,23 @@
   </h4>
 </div>
 
-<br/>
+[English](./README_en.md) | 中文
 <h2 id="a">📔 项目说明</h2>
 
-本项目旨在整合不同来源的广告过滤规则，通过 `Github Action` 定时执行，拉取远程规则，去重和分类输出。
-根据过滤规则的特性，本项目将规则分为 `DOMAIN`、`REGEX`、`MODIFY`、`HOSTS` 四种类型，它们之间互不包含， 你可在配置文件中自由的对四种类型进行组合：
+本项目旨在聚合不同来源、不同格式的广告过滤规则，自由的进行转换和整合。
+> ⚠️ 新版不再兼容原配置格式，迁移前务必注意
+#### 支持的规则格式
+- [x] easylist
+- [x] dnsmasq
+- [x] clash
+- [x] smartdns
+- [x] hosts
 
-- `DOMAIN`：基于域名的过滤规则，适用于几乎所有广告过滤工具
-- `REGEX`：包含通配符的**域名过滤**规则，适用于主流广告过滤工具
-- `MODIFY`：基于正则和其他修饰符的过滤规则，可以拦截页面上的特定元素，但不适用于DNS过滤
-- `HOSTS`：基于 `HOSTS` 的过滤规则，适用于支持 `HOSTS` 的所有设备
+#### 注意事项
+1. 仅支持基本规则转换，即域名、通配域名构成的规则，对形如 `||example.org^$popup` 等规则无法转换(合并、去重不受影响) 
+2. 接受不可避免的缩限，如 `||example.org^` 将拦截 example.org 及其所有子域，但将其转换为 hosts 格式时，将无法匹配子域名。
+3. 规则有效性检测基于域名解析，因此仅支持基本规则。
 
-<br/>
 <h2 id="b">🛠️ 快速开始</h2>
 
 ### 示例配置
@@ -44,8 +49,9 @@ application:
   rule:
     #远程规则订阅，path为 http、https地址
     remote:
-      - name: 'Subscription 1'
-        path: 'https://example.com/list.txt'
+      - name: 'Subscription 1'               #可选参数: 规则名称，如无将使用 path 作为名称
+        path: 'https://example.org/rule.txt' #必要参数: 规则url，仅支持 http/https，不限定响应内容格式
+        type:  easylist                      #可选参数: 规则类型：easylist (默认)、dnsmasq、clash、smartdns、hosts
 
     #本地规则，path为 操作系统支持的绝对或相对路径
     local:
@@ -53,22 +59,25 @@ application:
         path: '/rule/private.txt'
 
   output:
-    file_header: |  #输出文件头, 占位符${name}将被替换为文件名, ${date} 将被替换为当前日期时间
-      [ADFS Adblock List]
-      ! Title: ${name}
-      ! Last Modified: ${date}
-      ! Homepage: https://github.com/fordes123/ad-filters-subscriber/
-    path: rule   #规则文件输出路径，相对路径默认为程序所在路径
+    #文件头配置，将自动作为注释添加至每个规则文件开始
+    #可使用占位符 ${name}、${type}、${desc} 以及 ${date} (当前日期)
+    file_header: |
+      ADFS Adblock List
+      Title: ${name}
+      Last Modified: ${date}
+      Homepage: https://github.com/fordes123/ad-filters-subscriber/
     files:
-      all.txt: #输出文件名, 下列表为其包含的规则类型
-        - DOMAIN  #域名规则
-        - REGEX   #正则规则
-        - MODIFY  #修饰规则
-        - HOSTS   #hosts规则
+      - name: easylist.txt     #必要参数: 文件名
+        type: EASYLIST         #必要参数: 文件类型: easylist、dnsmasq、clash、smartdns、hosts
+        desc: 'ADFS EasyList'  #可选参数: 文件描述，可在file_header中通过 ${} 中使用
+        filter:                #可选参数: 包含规则的类型，默认全选
+          - basic              #基本规则，不包含任何控制、匹配符号, 可以转换为 hosts
+          - wildcard           #通配规则，仅使用通配符
+          - unknown            #其他规则，如使用了正则、高级修饰符号等，这表示目前无法支持
 ```
 
 ---
-本程序基于 `Java21` 编写，使用 `Maven` 进行构建，你可以参照示例配置，编辑 `src/main/resources/application.yml`
+本程序基于 `Java21` 编写，使用 `Maven` 进行构建，你可以参照[示例配置](./config/application-example.yaml)，编辑 `config/application.yaml`
 ，并通过以下任意一种方式快速开始：
 
 #### **本地调试**
@@ -84,24 +93,15 @@ mvn spring-boot:run
 
 - fork 本项目
 - 自定义规则订阅 (可选)
-    - 参照示例配置，修改配置文件: `src/main/resources/application.yml`
+    - 参照[示例配置](./config/application-example.yaml)，修改配置文件: `config/application.yaml`
 - 打开 `Github Action` 页面，选中左侧 `Update Filters` 授权 `Workflow` 定时执行(⚠ 重要步骤)
-- 点击 `Run workflow` 或等待自动执行。执行完成后相应规则生成在配置中指定的目录下
+- 点击 `Run workflow` 或等待自动执行。执行完成后规则将生成在 `release` 分支
 
 #### **Codespaces**
 
 - 登录 `Github`，点击本仓库右上角 `Code` 按钮，选择并创建新的 `Codespaces`
 - 等待 `Codespaces` 启动，即可直接对本项目进行调试
 
-### 如何更新
-
-当源代码存在更新时，(你的)仓库首页会出现如下图提示:
-<img src="./screen.png">
-
-此时选择 **Sync fork** 再选择 **Update branch** 即可同步更新.  
-(如曾修改过源代码，那么合并可能存在冲突，请谨慎处理)
-
-<br/>
 <h2 id="c">🎯 规则订阅</h2>
 
 **⚠ 本仓库不再提供规则订阅，我们更推荐 fork 本项目自行构建规则集.**
@@ -110,12 +110,11 @@ mvn spring-boot:run
 <details>
 <summary>点击查看</summary>
 <ul>
+    <br/>
     <li><a href="https://github.com/xndeye/adblock_list/">xndeye/adblock_list</a></li>
-    <p>欢迎提交 issues 或 pr 留下你的仓库地址~</p>
 </ul>
 </details>
 
-<br/>
 <h2 id="d">💬 问题反馈</h2>
 
 - 👉 [issues](https://github.com/fordes123/ad-filters-subscriber/issues)

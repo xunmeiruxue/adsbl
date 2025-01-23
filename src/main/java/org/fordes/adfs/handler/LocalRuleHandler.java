@@ -3,6 +3,8 @@ package org.fordes.adfs.handler;
 import lombok.extern.slf4j.Slf4j;
 import org.fordes.adfs.config.Config;
 import org.fordes.adfs.enums.HandleType;
+import org.fordes.adfs.handler.dns.DnsResolver;
+import org.fordes.adfs.model.Rule;
 import org.fordes.adfs.task.FileWriter;
 import org.fordes.adfs.util.BloomFilter;
 import org.fordes.adfs.util.Util;
@@ -26,8 +28,8 @@ import java.nio.file.StandardOpenOption;
 public class LocalRuleHandler extends RuleHandler {
 
     @Autowired
-    public LocalRuleHandler(BloomFilter<String> filter, FileWriter writer, Config config) {
-        super(filter, writer, config);
+    public LocalRuleHandler(BloomFilter<Rule> filter, FileWriter writer, Config config, DnsResolver dnsResolver) {
+        super(filter, writer, config, dnsResolver);
     }
 
     @Override
