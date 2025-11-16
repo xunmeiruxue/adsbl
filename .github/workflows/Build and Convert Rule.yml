@@ -37,7 +37,7 @@ jobs:
         mv sing-box*/sing-box .
 
     - name: Download easylist.txt
-      run: wget https://raw.githubusercontent.com/xunmeiruxue/adsbl/refs/heads/now/rule/easylist.txt
+      run: wget https://raw.githubusercontent.com/xunmeiruxue/adsbl/refs/heads/release/easylist.txt
 
     - name: Convert easylist.txt to sing.srs
       run: ./sing-box rule-set convert --type adguard --output sing.srs easylist.txt
